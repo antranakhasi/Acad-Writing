@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import openai
 import os
 from dotenv import load_dotenv
-from extract_data import extract_text_from_docx, login_and_get_article
+import docx2txt
 
 load_dotenv()
 
@@ -13,26 +13,25 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() == 'docx'
 
+def extract_text_from_docx(file):
+    return docx2txt.process(file)
+
 @app.route('/process', methods=['POST'])
 def process_request():
-    if 'file' not in request.files or 'url' not in request.form:
-        return jsonify({"error": "File and URL are required"}), 400
+    if 'article_file' not in request.files or 'writing_file' not in request.files:
+        return jsonify({"error": "Article file and writing file are required"}), 400
 
-    file = request.files['file']
-    target_url = request.form['url']
+    article_file = request.files['article_file']
+    writing_file = request.files['writing_file']
 
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
+    if article_file.filename == '' or writing_file.filename == '':
+        return jsonify({"error": "No selected file(s)"}), 400
 
-    if file and allowed_file(file.filename):
-        docx_text = extract_text_from_docx(file)
-    else:
+    if not (allowed_file(article_file.filename) and allowed_file(writing_file.filename)):
         return jsonify({"error": "Invalid file format. Only .docx files are allowed."}), 400
 
-    try:
-        article_text = login_and_get_article(target_url)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    article_text = extract_text_from_docx(article_file)
+    writing_text = extract_text_from_docx(writing_file)
 
     prompt = f"""
     Hello, ChatGPT! I am working on improving my academic writing skills, and I would like your assistance in practicing summarizing scholarly articles. I will provide you with a scholarly article, and my task will be to write a concise and accurate summary of it.
@@ -58,9 +57,9 @@ def process_request():
         - If possible, provide examples of how a particular section or sentence can be improved or rewritten for better clarity and impact.
 
     Here is the article for this exercise: {article_text}
-    And here is my summary of the article:
+    And here is my summary of the article:{writing_text}
 
-    {docx_text}
+    Note: Please do not use any external data or knowledge apart from the information provided in this prompt.
 
     Thank you for your help!
     """
@@ -69,9 +68,8 @@ def process_request():
 
 def chat_with_gpt(prompt):
     response = openai.Completion.create(
-        engine="text-davinci-002",
-        prompt=prompt,
-        max_tokens=150
+        engine="gpt-3.5-turbo-0125",
+        prompt=prompt
     )
     return jsonify({"response": response.choices[0].text.strip()})
 
